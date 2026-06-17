@@ -46,8 +46,11 @@ datasets==3.1.0               # arrow caching, save_to_disk/load_from_disk
 # --- Quantization + attention (CUDA / A100 ONLY) ---------------------------
 # bitsandbytes: 4-bit NF4 + double quant. Requires CUDA. NEVER imported on CPU
 # (guarded in src/config.get_quantization_config). Do NOT install on the CPU
-# smoke-test box.
-bitsandbytes==0.45.0          # NF4 + double-quant, CUDA 12.x (install on Colab only)
+# smoke-test box. Pinned to a CURRENT release that ships manylinux CUDA wheels
+# matching Colab's torch (CUDA 12/13); the old early-2025 pin lacked a binary
+# for Colab's current torch. The notebook runs a fast 4-bit pre-flight so any
+# bitsandbytes/CUDA/peft mismatch fails in seconds, before data prep.
+bitsandbytes==0.49.2          # NF4 + double-quant, current CUDA wheels (Colab)
 
 # flash-attn: Flash Attention 2. Ampere (SM 8.0) supported. NOT installed here
 # and intentionally NOT pinned to a fixed version: a hardcoded flash-attn
