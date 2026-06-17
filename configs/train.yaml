@@ -1,0 +1,73 @@
+# ============================================================================
+# QLoRA SFT training configuration (REAL A100 run).
+# Values here describe the full Mistral-7B run. The smoke test does NOT use
+# this file's model/sizes; it overrides via Settings(smoke_test=True) which
+# swaps in TINY_MODEL and tiny step counts. See src/config.py.
+# ============================================================================
+
+# --- Models ---------------------------------------------------------------
+model_id: "mistralai/Mistral-7B-Instruct-v0.3"   # gated: accept license + HF_TOKEN
+tiny_model: "sshleifer/tiny-gpt2"                 # CPU smoke-test stand-in only
+
+# --- Dataset (DOMAIN DECISION: Finance) -----------------------------------
+# Chosen domain: Finance. Rationale (interview talking point): clean for a
+# public demo, no sensitive-advice disclaimer burden, instruction-style data
+# that maps directly onto Mistral-Instruct chat formatting.
+dataset_id: "gbharti/finance-alpaca"
+domain: "finance"
+subsample_size: 50000          # subsample AFTER dedupe, fixed seed
+eval_holdout_size: 1000        # held out BEFORE any training; never seen in train/ablation
+seed: 42
+
+# --- LoRA / QLoRA ----------------------------------------------------------
+lora_rank: 16
+lora_alpha: 32
+lora_dropout: 0.05
+# Attention + MLP projections for the real (Llama/Mistral) architecture.
+# For the tiny GPT-2 smoke model these names don't exist, so the smoke
+# override uses ["c_attn"] instead (set in src/config.py).
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+# --- 4-bit quantization (NF4) ---------------------------------------------
+# bnb_4bit_compute_dtype is bf16 (native on Ampere). On CPU the whole quant
+# config is disabled by the guard and the model loads in fp32.
+bnb_4bit_quant_type: "nf4"
+bnb_4bit_use_double_quant: true
+bnb_4bit_compute_dtype: "bfloat16"
+
+# --- Training --------------------------------------------------------------
+max_seq_length: 1024
+num_train_epochs: 1
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 4      # effective batch = 32
+learning_rate: 0.0002               # 2e-4
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.03
+weight_decay: 0.0
+optim: "paged_adamw_8bit"           # paged optimizer pairs with QLoRA on CUDA
+bf16: true                          # native on Ampere; do NOT use fp16
+gradient_checkpointing: true
+logging_steps: 10
+save_steps: 100                     # checkpoint to Drive every 100 steps
+save_total_limit: 3
+eval_steps: 200
+
+# --- Output / checkpointing ------------------------------------------------
+# On Colab, point output_dir at a Drive-mounted path so disconnects are cheap.
+output_dir: "outputs/mistral7b-finance-qlora"
+resume_from_checkpoint: true        # auto-resume latest checkpoint if present
+
+# --- Hub -------------------------------------------------------------------
+push_to_hub: false                  # set true in Colab to push final adapter
+hub_model_id: ""                    # e.g. "your-username/mistral7b-finance-qlora"
+
+# --- Tracking --------------------------------------------------------------
+report_to: "wandb"                  # falls back to "none" if WANDB_API_KEY unset
+wandb_project: "mistral7b-finance-qlora"

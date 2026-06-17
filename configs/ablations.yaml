@@ -1,0 +1,34 @@
+# ============================================================================
+# Ablation grid: 24 SHORT diagnostic runs (NOT 24 full trainings).
+# Each run is a few hundred steps on a small subset, just enough to compare
+# loss trajectories and pick a config. On the A100 the full grid is cheap
+# precisely because QLoRA keeps each run fast and low-VRAM.
+#
+# Grid size: ranks(3) x learning_rates(2) x schedulers(4) = 24.
+# ============================================================================
+
+# Short-run budget (per cell). Overridden tiny in the smoke test.
+max_steps: 300            # few-hundred-step diagnostic, not a full epoch
+subset_size: 2000         # small training subset for fast signal
+eval_subset_size: 200     # quick eval slice for ranking
+per_device_train_batch_size: 8
+gradient_accumulation_steps: 2
+warmup_ratio: 0.03
+logging_steps: 10
+
+# Fixed LoRA pieces (only rank varies across the grid).
+lora_alpha_multiplier: 2  # alpha = rank * multiplier (keeps alpha/rank ratio constant)
+lora_dropout: 0.05
+
+# --- The grid --------------------------------------------------------------
+ranks: [8, 16, 32]
+learning_rates: [0.0001, 0.0002]      # 1e-4, 2e-4
+schedulers: ["cosine", "linear", "constant", "constant_with_warmup"]
+
+# Selection: lowest eval_loss wins (tie-break: smaller rank = cheaper to serve).
+selection_metric: "eval_loss"
+selection_mode: "min"
+
+# Output
+results_dir: "ablation_results"
+wandb_project: "mistral7b-finance-ablations"

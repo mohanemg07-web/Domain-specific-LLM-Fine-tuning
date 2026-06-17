@@ -1,0 +1,75 @@
+# ============================================================================
+# Pinned dependencies for the A100 / Colab training environment.
+# Every pin is commented. This stack has been chosen to be mutually
+# compatible; bumping any one of these (especially torch / flash-attn /
+# bitsandbytes) is the #1 cause of breakage, so change deliberately.
+#
+# CPU smoke test (this machine, no GPU): install everything EXCEPT
+# bitsandbytes and flash-attn. Those two are CUDA-only and are guarded out
+# at runtime by src/config.py when no CUDA device is present. See
+# requirements-cpu.txt for the smoke-test subset.
+#
+# These exact versions are the ones the CPU smoke test was actually run
+# against (transformers 5.x / trl 1.x / peft 0.19 era). The TRL API used in
+# src/train/sft.py is the 1.x one: SFTConfig(dataset_text_field=..., max_length
+# =..., packing=...) + SFTTrainer(processing_class=...).
+#
+# WINDOWS NOTE: trl 1.5.x reads its bundled .jinja chat templates with the OS
+# default codec and crashes on Windows (cp1252). Run with PYTHONUTF8=1 (the
+# test conftest.py forces this automatically). Linux/Colab default to UTF-8.
+# ============================================================================
+
+# --- Core training stack ---------------------------------------------------
+# torch: use Colab's preinstalled CUDA build; do NOT reinstall.
+# Pinning torch here was a landmine: on a Colab A100, `pip install -r
+# requirements.txt` would replace the runtime's CUDA torch with a PyPI wheel
+# (CPU build => silent CPU training, or a mismatched build => broken flash-attn
+# ABI). torch is therefore intentionally NOT listed. The Colab notebook pins
+# torch to whatever Colab already has (via a constraints file) so nothing here
+# can upgrade/downgrade it, and asserts CUDA torch before training.
+
+# transformers: SFTConfig/processing_class API used in src/train/sft.py.
+transformers==5.11.0          # Mistral-v0.3 support + chat templates (tested)
+
+# peft: LoRA/QLoRA adapters; target_modules + NF4 load path.
+peft==0.19.1                  # tested with transformers 5.x
+
+# trl: SFTTrainer + SFTConfig API (dataset_text_field on SFTConfig).
+trl==1.5.1                    # SFTConfig/processing_class API in src/train/sft.py
+
+# accelerate: device placement / gradient checkpointing plumbing.
+accelerate==1.14.0            # tested with transformers 5.x
+
+# datasets: load + map + save_to_disk caching used by data/prepare.py.
+datasets==3.1.0               # arrow caching, save_to_disk/load_from_disk
+
+# --- Quantization + attention (CUDA / A100 ONLY) ---------------------------
+# bitsandbytes: 4-bit NF4 + double quant. Requires CUDA. NEVER imported on CPU
+# (guarded in src/config.get_quantization_config). Do NOT install on the CPU
+# smoke-test box.
+bitsandbytes==0.45.0          # NF4 + double-quant, CUDA 12.x (install on Colab only)
+
+# flash-attn: Flash Attention 2. Ampere (SM 8.0) supported. NOT installed via
+# `-r requirements.txt` because it MUST be built with --no-build-isolation
+# against the runtime torch (a plain `-r` install would try to build it in an
+# isolated env against the wrong torch and fail). The Colab notebook installs
+# it explicitly:
+#     pip install flash-attn==2.7.4.post1 --no-build-isolation
+# Pin to the release whose prebuilt wheel matches your Colab torch/CUDA/Python;
+# guarded out on CPU/pre-Ampere. (Kept here, commented, as the source of truth
+# for the pin.)
+# flash-attn==2.7.4.post1     # installed by colab/train_notebook.ipynb, not here
+
+# --- Evaluation metrics ----------------------------------------------------
+sacrebleu==2.6.0              # BLEU (reproducible, tokenization-stable)
+evaluate==0.4.6               # metric harness for ROUGE
+rouge_score==0.1.2            # ROUGE-L backend used by evaluate
+
+# --- Export / serving ------------------------------------------------------
+sentencepiece==0.2.1          # Mistral tokenizer dependency
+huggingface_hub==1.19.0       # push adapter / pull checkpoints / hub I/O
+# llama-cpp-python is only needed for GGUF serving in spaces/; pinned there
+# (spaces/requirements.txt) so the training image stays lean.
+
+# --- Experiment tracking ---------------------------------------------------
+wandb==0.18.7                 # ablation + training run logging

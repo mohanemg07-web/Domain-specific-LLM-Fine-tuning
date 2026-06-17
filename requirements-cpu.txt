@@ -1,0 +1,20 @@
+# CPU smoke-test subset (this machine / any non-CUDA box).
+# Intentionally EXCLUDES bitsandbytes and flash-attn: both are CUDA-only and
+# are guarded out at runtime by src/config.py. Installing them on CPU either
+# fails to build or fails to import, which is exactly why the guards exist.
+#
+# Versions left unpinned here so they resolve against whatever CPU torch you
+# already have. The pinned, interview-defensible stack is requirements.txt
+# (the one that actually trains the 7B on the A100).
+transformers
+peft
+trl
+accelerate
+datasets
+sacrebleu
+evaluate
+rouge_score
+sentencepiece
+huggingface_hub
+pytest
+PyYAML
