@@ -172,6 +172,35 @@ def test_gguf_skips_cleanly_without_llama_cpp(smoke_settings, tmp_path, monkeypa
 
 
 # ---------------------------------------------------------------------------
+# FA2 Ampere enforcement + ALLOW_SDPA_FALLBACK (simulated Ampere on CPU)
+# ---------------------------------------------------------------------------
+def test_ampere_fa2_enforcement_and_sdpa_fallback(smoke_settings, monkeypatch):
+    """On a simulated Ampere GPU where FA2 is unavailable:
+      * default -> load aborts loudly,
+      * ALLOW_SDPA_FALLBACK=1 -> proceeds on sdpa and records it.
+    Proven on CPU by faking the capability + attn-guard return values.
+    """
+    import torch
+
+    from src.train import sft
+
+    # Pretend we're on an A100 but flash-attn is missing (guard -> sdpa).
+    monkeypatch.setattr(sft, "gpu_compute_capability", lambda: 8.0)
+    monkeypatch.setattr(sft, "get_attn_implementation", lambda: "sdpa")
+    monkeypatch.setattr(sft, "get_compute_dtype", lambda: torch.float32)
+
+    # Case 1: no escape hatch -> loud abort, no wasted session.
+    monkeypatch.delenv("ALLOW_SDPA_FALLBACK", raising=False)
+    with pytest.raises(RuntimeError, match="Flash Attention 2 is not available"):
+        sft.load_model_and_tokenizer(smoke_settings)
+
+    # Case 2: opt-in fallback -> proceeds on sdpa, records sdpa.
+    monkeypatch.setenv("ALLOW_SDPA_FALLBACK", "1")
+    model, _ = sft.load_model_and_tokenizer(smoke_settings)
+    assert sft.active_attn_implementation(model) == "sdpa"
+
+
+# ---------------------------------------------------------------------------
 # Network helper for the real-data / real-model proofs
 # ---------------------------------------------------------------------------
 def _hf_reachable() -> bool:

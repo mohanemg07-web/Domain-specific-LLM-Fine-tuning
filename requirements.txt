@@ -49,16 +49,14 @@ datasets==3.1.0               # arrow caching, save_to_disk/load_from_disk
 # smoke-test box.
 bitsandbytes==0.45.0          # NF4 + double-quant, CUDA 12.x (install on Colab only)
 
-# flash-attn: Flash Attention 2. Ampere (SM 8.0) supported. NOT installed via
-# `-r requirements.txt` because it MUST be built with --no-build-isolation
-# against the runtime torch (a plain `-r` install would try to build it in an
-# isolated env against the wrong torch and fail). The Colab notebook installs
-# it explicitly:
-#     pip install flash-attn==2.7.4.post1 --no-build-isolation
-# Pin to the release whose prebuilt wheel matches your Colab torch/CUDA/Python;
-# guarded out on CPU/pre-Ampere. (Kept here, commented, as the source of truth
-# for the pin.)
-# flash-attn==2.7.4.post1     # installed by colab/train_notebook.ipynb, not here
+# flash-attn: Flash Attention 2. Ampere (SM 8.0) supported. NOT installed here
+# and intentionally NOT pinned to a fixed version: a hardcoded flash-attn
+# version goes stale and won't have a prebuilt wheel for Colab's current torch,
+# forcing a slow/failing source build. Instead the Colab notebook runs
+#     python scripts/install_flash_attn.py
+# which detects the runtime torch/CUDA/cpython/abi and installs the MATCHING
+# prebuilt wheel from flash-attn's GitHub releases (fallback: a
+# --no-build-isolation build of the latest). Guarded out on CPU/pre-Ampere.
 
 # --- Evaluation metrics ----------------------------------------------------
 sacrebleu==2.6.0              # BLEU (reproducible, tokenization-stable)

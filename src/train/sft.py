@@ -38,10 +38,30 @@ def _is_ampere_or_newer() -> bool:
     return cc is not None and cc >= 8.0
 
 
+def _allow_sdpa_fallback() -> bool:
+    """Opt-in escape hatch: if flash-attn genuinely can't install, let the user
+    proceed on SDPA (loudly) rather than waste a paid A100 session.
+
+    Default OFF. Enable with ALLOW_SDPA_FALLBACK=1 (or true/yes).
+    """
+    val = os.environ.get("ALLOW_SDPA_FALLBACK", "")
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _fa2_install_hint() -> str:
+    return (
+        "Install a flash-attn build matching Colab's torch:\n"
+        "    python scripts/install_flash_attn.py\n"
+        "(picks the matching prebuilt wheel, else builds with --no-build-isolation)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Model + tokenizer loading (with the runtime guards)
 # ---------------------------------------------------------------------------
 def load_model_and_tokenizer(settings: Settings):
+    import warnings
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -51,15 +71,28 @@ def load_model_and_tokenizer(settings: Settings):
     compute_dtype = get_compute_dtype()
 
     # Task 2: on an Ampere+ GPU we REQUIRE Flash Attention 2. If the guard fell
-    # back to sdpa it means flash-attn isn't importable -- fail loudly instead
-    # of silently training with the wrong (slower, non-advertised) kernel.
+    # back to sdpa it means flash-attn isn't importable. Fail loudly UNLESS the
+    # user explicitly set ALLOW_SDPA_FALLBACK, in which case proceed on sdpa
+    # with a loud warning (and record sdpa as the active impl downstream).
     if _is_ampere_or_newer() and attn_impl != "flash_attention_2":
-        raise RuntimeError(
-            "Ampere+ GPU detected but Flash Attention 2 is not available "
-            f"(attn guard selected '{attn_impl}'). Install it with:\n"
-            "    pip install flash-attn==2.7.4.post1 --no-build-isolation\n"
-            "Refusing to silently fall back to sdpa on an A100."
-        )
+        if _allow_sdpa_fallback():
+            warnings.warn(
+                "\n" + "=" * 72 + "\n"
+                "ALLOW_SDPA_FALLBACK is set: Flash Attention 2 is NOT available "
+                f"on this Ampere+ GPU (guard selected '{attn_impl}').\n"
+                "Proceeding on SDPA by your choice. This is SLOWER than FA2 and "
+                "the recorded attn_implementation_active will be 'sdpa'.\n"
+                + _fa2_install_hint() + "\n" + "=" * 72,
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        else:
+            raise RuntimeError(
+                "Ampere+ GPU detected but Flash Attention 2 is not available "
+                f"(attn guard selected '{attn_impl}').\n" + _fa2_install_hint()
+                + "\nRefusing to silently fall back to sdpa on an A100. "
+                "Set ALLOW_SDPA_FALLBACK=1 to override deliberately."
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
@@ -81,11 +114,20 @@ def load_model_and_tokenizer(settings: Settings):
     # Read back what the LOADED model is ACTUALLY using (not what we requested).
     active_attn = getattr(model.config, "_attn_implementation", attn_impl)
     if _is_ampere_or_newer() and active_attn != "flash_attention_2":
-        raise RuntimeError(
-            f"Model loaded with attn_implementation='{active_attn}' on an "
-            "Ampere+ GPU; expected 'flash_attention_2'. Aborting rather than "
-            "recording a metric that doesn't match the advertised setup."
-        )
+        if _allow_sdpa_fallback():
+            warnings.warn(
+                f"Model loaded with attn_implementation='{active_attn}' on an "
+                "Ampere+ GPU (ALLOW_SDPA_FALLBACK set). Recording it as-is.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        else:
+            raise RuntimeError(
+                f"Model loaded with attn_implementation='{active_attn}' on an "
+                "Ampere+ GPU; expected 'flash_attention_2'. Aborting rather than "
+                "recording a metric that doesn't match the advertised setup. "
+                "Set ALLOW_SDPA_FALLBACK=1 to override deliberately."
+            )
 
     model.config.use_cache = False  # required with gradient checkpointing
     return model, tokenizer
