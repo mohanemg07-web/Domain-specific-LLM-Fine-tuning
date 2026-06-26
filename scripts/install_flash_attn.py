@@ -17,6 +17,7 @@ non-CUDA box (it will just attempt the fallback, which the caller can ignore).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -106,6 +107,13 @@ def main() -> int:
         print("No prebuilt wheel matched this torch/CUDA/cpython/abi.")
 
     # Fallback: latest flash-attn, built against the installed torch.
+    # Colab's bleeding-edge torch (e.g. 2.11) often has no prebuilt wheel yet, so
+    # this source build is the real path. Harden it: ninja makes the build use
+    # all cores (without it nvcc compiles serially and times out), and capping
+    # MAX_JOBS avoids the parallel-nvcc OOM that silently kills the build on a
+    # 12-16 GB Colab box.
+    os.environ["MAX_JOBS"] = "4"
+    _pip("ninja")
     rc = _pip("-U", "flash-attn", "--no-build-isolation")
     if rc == 0:
         _verify()

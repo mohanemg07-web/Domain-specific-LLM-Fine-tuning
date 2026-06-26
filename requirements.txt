@@ -41,7 +41,7 @@ trl==1.5.1                    # SFTConfig/processing_class API in src/train/sft.
 accelerate==1.14.0            # tested with transformers 5.x
 
 # datasets: load + map + save_to_disk caching used by data/prepare.py.
-datasets==3.1.0               # arrow caching, save_to_disk/load_from_disk
+datasets>=4.7.0,<5.0          # trl 1.5.1 needs >=4.7.0; <5.0 caps the new major (resolves 4.8.x)
 
 # --- Quantization + attention (CUDA / A100 ONLY) ---------------------------
 # bitsandbytes: 4-bit NF4 + double quant. Requires CUDA. NEVER imported on CPU
