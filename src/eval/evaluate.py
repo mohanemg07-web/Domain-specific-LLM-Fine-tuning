@@ -21,8 +21,7 @@ from typing import Optional
 from src.config import (
     REPO_ROOT,
     Settings,
-    get_attn_implementation,
-    get_compute_dtype,
+    cuda_available,
     load_settings,
 )
 
@@ -59,29 +58,41 @@ def _generate(model, tokenizer, prompt: str, max_new_tokens: int) -> str:
     return tokenizer.decode(gen, skip_special_tokens=True).strip()
 
 
-def _load_model(model_id_or_path: str, adapter_dir: Optional[str] = None):
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+def _load_model(settings: Settings, adapter_dir: Optional[str] = None):
+    """Load the eval model with the SAME guards + quantization as training.
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id_or_path, dtype=get_compute_dtype(),
-            attn_implementation=get_attn_implementation(),
-        )
-    except TypeError:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id_or_path, torch_dtype=get_compute_dtype(),
-            attn_implementation=get_attn_implementation(),
-        )
+    Reuses src.train.sft.load_model_and_tokenizer so eval and training share one
+    code path: 4-bit NF4 on CUDA (via config.get_quantization_config -> the 7B
+    fits in ~10 GB on a 15 GB T4 instead of OOM-ing in full precision), the attn
+    impl chosen by get_attn_implementation() (SDPA on a T4, never FA2; honors
+    SKIP_FLASH_ATTN / ALLOW_SDPA_FALLBACK), and bf16 compute. On CPU the same
+    guards load the tiny model in full precision (the smoke test).
+
+    Pass adapter_dir to wrap the base with the trained LoRA adapter.
+    """
+    from src.train.sft import load_model_and_tokenizer
+
+    model, tokenizer = load_model_and_tokenizer(settings)
     if adapter_dir:
         from peft import PeftModel
 
         model = PeftModel.from_pretrained(model, adapter_dir)
+    # Training disables the KV cache for gradient checkpointing; eval only
+    # generates, so re-enable it (faster, and there's no grad-checkpoint here).
+    model.config.use_cache = True
     model.eval()
     return model, tokenizer
+
+
+def _free_cuda() -> None:
+    """Reclaim VRAM from a just-deleted model so only one 7B is ever resident."""
+    import gc
+
+    gc.collect()
+    if cuda_available():
+        import torch
+
+        torch.cuda.empty_cache()
 
 
 def _score(predictions: list[str], references: list[str]) -> dict:
@@ -124,19 +135,25 @@ def evaluate(
     if adapter_dir is None:
         adapter_dir = str(REPO_ROOT / settings.output_dir / "final_adapter")
 
-    # ---- base ----------------------------------------------------------
-    base_model, base_tok = _load_model(base_id)
+    # Run the two 7B models SEQUENTIALLY so only ONE is ever in VRAM. On a 15 GB
+    # T4 holding both OOMs before generation even starts; 4-bit + this one-at-a-
+    # time pattern keeps peak VRAM at a single ~10 GB model.
+
+    # ---- base: load -> generate over the eval set -> free VRAM ---------
+    base_model, base_tok = _load_model(settings)
     t0 = time.time()
     base_preds = [_generate(base_model, base_tok, p, max_new_tokens) for p in prompts]
     base_secs = round(time.time() - t0, 2)
-    del base_model
+    del base_model, base_tok
+    _free_cuda()
 
-    # ---- fine-tuned ----------------------------------------------------
-    ft_model, ft_tok = _load_model(base_id, adapter_dir=adapter_dir)
+    # ---- fine-tuned (base + adapter): load -> generate -> free ---------
+    ft_model, ft_tok = _load_model(settings, adapter_dir=adapter_dir)
     t1 = time.time()
     ft_preds = [_generate(ft_model, ft_tok, p, max_new_tokens) for p in prompts]
     ft_secs = round(time.time() - t1, 2)
-    del ft_model
+    del ft_model, ft_tok
+    _free_cuda()
 
     base_scores = _score(base_preds, refs)
     ft_scores = _score(ft_preds, refs)
