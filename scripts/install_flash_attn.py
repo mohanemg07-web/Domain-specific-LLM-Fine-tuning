@@ -83,6 +83,13 @@ def _pip(*args: str) -> int:
 
 
 def main() -> int:
+    # Escape hatch for Colab's torch 2.11 (no prebuilt flash-attn wheel yet, and
+    # the source build can stall for 40+ min then fail). Set SKIP_FLASH_ATTN=1 to
+    # bypass everything and let the attn guard fall back to SDPA.
+    if os.environ.get("SKIP_FLASH_ATTN", "").strip().lower() in ("1", "true", "yes", "on"):
+        print("SKIP_FLASH_ATTN set -- skipping flash-attn; training will use SDPA")
+        return 0
+
     tags = _runtime_tags()
     print("Runtime:", json.dumps(tags))
     if not tags["cuda_available"]:
