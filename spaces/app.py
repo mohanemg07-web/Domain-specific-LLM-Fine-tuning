@@ -46,10 +46,14 @@ def get_llm():
     if _llm is None:
         from llama_cpp import Llama
 
+        # Free HF Spaces give ~2 vCPUs; os.cpu_count() oversubscribes them and a
+        # single reply could run >10 min and time out. n_threads=2 is what
+        # actually produced a clean ~1.3 tok/s reply on the free CPU Space.
+        n_threads = int(os.environ.get("N_THREADS", "2"))
         _llm = Llama(
             model_path=_resolve_gguf_path(),
             n_ctx=2048,
-            n_threads=os.cpu_count(),
+            n_threads=n_threads,
             verbose=False,
         )
     return _llm
@@ -63,8 +67,10 @@ def chat_fn(message, history):
         messages.append({"role": "assistant", "content": assistant})
     messages.append({"role": "user", "content": message})
 
+    # 64 (not 256) keeps a free-CPU reply inside the Space's timeout at ~1.3 tok/s.
+    max_tokens = int(os.environ.get("MAX_TOKENS", "64"))
     t0 = time.time()
-    out = llm.create_chat_completion(messages=messages, max_tokens=256, temperature=0.7)
+    out = llm.create_chat_completion(messages=messages, max_tokens=max_tokens, temperature=0.7)
     elapsed = time.time() - t0
 
     text = out["choices"][0]["message"]["content"]

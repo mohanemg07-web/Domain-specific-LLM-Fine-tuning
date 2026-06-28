@@ -1,5 +1,9 @@
 # Hugging Face Space (CPU) dependencies. Kept minimal so the free CPU Space
 # boots fast. No torch/transformers needed -- llama.cpp runs the GGUF directly.
-gradio==5.7.1                 # chat UI
+#
+# Do NOT pin (or even list) gradio here: HF Spaces injects its own gradio for the
+# Gradio SDK, and pinning it (we had gradio==5.7.1) caused a pip
+# ResolutionImpossible against the Space's forced version. Let the platform
+# provide gradio; we declare only what it does not.
 llama-cpp-python==0.3.2       # CPU GGUF inference (prebuilt CPU wheel)
 huggingface_hub==1.19.0       # pull the GGUF from the hub at startup

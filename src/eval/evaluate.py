@@ -14,6 +14,7 @@ that is the point of the smoke test (prove the harness, not the quality).
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -133,7 +134,13 @@ def evaluate(
 
     base_id = settings.active_model_id
     if adapter_dir is None:
-        adapter_dir = str(REPO_ROOT / settings.output_dir / "final_adapter")
+        # Precedence: explicit arg (above) > ADAPTER_DIR env > default path. The
+        # env lets eval point at a Drive checkpoint OR a Hub repo (e.g.
+        # 'MohanGen/mistral7b-finance-qlora', which PeftModel pulls directly) with
+        # no symlink -- the default path doesn't exist on a fresh runtime.
+        adapter_dir = os.environ.get("ADAPTER_DIR") or str(
+            REPO_ROOT / settings.output_dir / "final_adapter"
+        )
 
     # Run the two 7B models SEQUENTIALLY so only ONE is ever in VRAM. On a 15 GB
     # T4 holding both OOMs before generation even starts; 4-bit + this one-at-a-
@@ -186,7 +193,16 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--max-samples", type=int, default=None)
+    ap.add_argument(
+        "--adapter-dir", default=None,
+        help="LoRA adapter location (local dir or Hub repo id). "
+             "Overrides the ADAPTER_DIR env var and the default path.",
+    )
     args = ap.parse_args()
     s = load_settings(smoke_test=args.smoke or None)
     n = args.max_samples or (5 if args.smoke else None)
-    print(json.dumps(evaluate(s, max_eval_samples=n, max_new_tokens=16 if args.smoke else 128), indent=2))
+    print(json.dumps(
+        evaluate(s, adapter_dir=args.adapter_dir, max_eval_samples=n,
+                 max_new_tokens=16 if args.smoke else 128),
+        indent=2,
+    ))

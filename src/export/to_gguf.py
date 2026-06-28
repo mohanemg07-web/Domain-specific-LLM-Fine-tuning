@@ -31,10 +31,16 @@ def _find_convert_script(llama_cpp_dir: Path) -> Optional[Path]:
 
 
 def _find_quantize_bin(llama_cpp_dir: Path) -> Optional[str]:
-    # llama.cpp build outputs vary by version/platform.
+    # llama.cpp build outputs vary by version/platform. An OUT-OF-SOURCE build run
+    # from the repo root (`cmake -B build llama.cpp`) drops the binary under
+    # <repo>/build/bin -- NOT under the llama.cpp checkout -- so search both. The
+    # repo-root path is the one verified on Colab:
+    #   /content/Domain-specific-LLM-Fine-tuning/build/bin/llama-quantize
     candidates = [
         llama_cpp_dir / "build" / "bin" / "llama-quantize",
         llama_cpp_dir / "build" / "bin" / "llama-quantize.exe",
+        REPO_ROOT / "build" / "bin" / "llama-quantize",
+        REPO_ROOT / "build" / "bin" / "llama-quantize.exe",
         llama_cpp_dir / "llama-quantize",
         llama_cpp_dir / "quantize",
     ]
